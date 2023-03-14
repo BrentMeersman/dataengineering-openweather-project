@@ -2,7 +2,7 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.hooks.base import BaseHook
-from airflow.macros import macros   
+from airflow import macros   
 from datetime import datetime, timedelta
 import requests
 import csv
