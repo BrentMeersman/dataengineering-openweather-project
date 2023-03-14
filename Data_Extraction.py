@@ -1,14 +1,14 @@
 # Import libraries
-
 from airflow import DAG
 from airflow.operators import PythonOperator
 from datetime import datetime, timedelta
 import requests
 import csv
+from airflow.hooks.base_hook import BaseHook
 from azure.storage.filedatalake import DataLakeFileClient
+from azure.identity import ClientSecretCredential
 
 # Extract weather data from OpenWeather API
-
 def extract_weather_data():
     api_key = '8328839ad6dd82815f586e37f8b50064'
     city = 'Aalst,be'
@@ -16,23 +16,28 @@ def extract_weather_data():
     response = requests.get(url)
     data = response.json()
 
+    # Retrieve the connection information from Airflow
+    conn = BaseHook.get_connection('azure_data_lake_conn')
+
+    # Create the DataLakeFileClient
+    storage_account_name = conn.login
+    file_system_name = 'raw'
+    credential = ClientSecretCredential(conn.extra['tenant_id'], conn.extra['client_id'], conn.password)
+    service_client = DataLakeFileClient.from_connection_string(conn_str=f'DefaultEndpointsProtocol=https;AccountName={storage_account_name};FileSystem={file_system_name};', credential=credential)
+
+    # Generate the name and path of the CSV file
+    filename = f'weather_data_{macros.ds_nodash}.csv'
+    filepath = f'/raw/weather/{macros.ds_nodash}/{filename}'
+
     # Write data to CSV file
-    with open('weather_data.csv', mode='w', newline='') as file:
+    with open(filename, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(['city', 'temperature', 'humidity', 'pressure', 'wind_speed', 'wind_degrees', 'cloudiness'])
         writer.writerow([city, data['main']['temp'], data['main']['humidity'], data['main']['pressure'], data['wind']['speed'], data['wind']['deg'], data['clouds']['all']])
 
     # Upload the CSV file to Azure Data Lake
-    storage_account_name = 'datamanproject1'
-    file_system_name = 'raw'
-    client_id = '9668f20a-85cb-4f77-8f86-0844e25e9b74'
-    client_secret = 'hTa8Q~6LtWPlMLpvYE1IGwB50X228ZXsNbraYbIk'
-    tenant_id = '4726a35c-3923-4db5-b2cc-9c0b70ffb3d6'
-    dl_credential = ClientSecretCredential(tenant_id, client_id, client_secret)
-    service_client = DataLakeFileClient.from_connection_string(conn_str=f'DefaultEndpointsProtocol=https;AccountName={storage_account_name};FileSystem={file_system_name};', credential=dl_credential)
-    with open('weather_data.csv', mode='rb') as file:
-        service_client.upload_file('weather_data.csv', file)
-
+    with open(filename, mode='rb') as file:
+        service_client.upload_file(filepath, file)
 
 # Define the default arguments for the DAG
 default_args = {
@@ -54,5 +59,3 @@ extract_data_task = PythonOperator(
     python_callable=extract_weather_data,
     dag=dag
 )
-
-extract_data_task
