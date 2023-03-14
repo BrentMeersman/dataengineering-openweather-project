@@ -1,10 +1,11 @@
 # Import libraries
 from airflow import DAG
-from airflow.operators import PythonOperator
+from airflow.operators.python import PythonOperator
+from airflow.hooks.base import BaseHook
+from airflow.macros import macros   
 from datetime import datetime, timedelta
 import requests
 import csv
-from airflow.hooks.base_hook import BaseHook
 from azure.storage.filedatalake import DataLakeFileClient
 from azure.identity import ClientSecretCredential
 
