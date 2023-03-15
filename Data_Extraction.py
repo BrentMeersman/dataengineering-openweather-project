@@ -1,13 +1,10 @@
 # Import libraries
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from airflow.hooks.base import BaseHook
-from airflow import macros   
 from datetime import datetime, timedelta
 import requests
 import csv
-from azure.storage.filedatalake import DataLakeFileClient
-from azure.identity import ClientSecretCredential
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 
 # Extract weather data from OpenWeather API
 def extract_weather_data():
@@ -17,28 +14,33 @@ def extract_weather_data():
     response = requests.get(url)
     data = response.json()
 
-    # Retrieve the connection information from Airflow
-    conn = BaseHook.get_connection('azure_data_lake_conn')
-
-    # Create the DataLakeFileClient
-    storage_account_name = conn.login
-    file_system_name = 'raw'
-    credential = ClientSecretCredential(conn.extra['tenant_id'], conn.extra['client_id'], conn.password)
-    service_client = DataLakeFileClient.from_connection_string(conn_str=f'DefaultEndpointsProtocol=https;AccountName={storage_account_name};FileSystem={file_system_name};', credential=credential)
-
-    # Generate the name and path of the CSV file
-    filename = f'weather_data_{macros.ds_nodash}.csv'
-    filepath = f'/raw/weather/{macros.ds_nodash}/{filename}'
+    # Generate the name of the CSV file
+    filename = f'weather_data_{datetime.now().strftime("%Y%m%d")}.csv'
 
     # Write data to CSV file
     with open(filename, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(['city', 'temperature', 'humidity', 'pressure', 'wind_speed', 'wind_degrees', 'cloudiness'])
-        writer.writerow([city, data['main']['temp'], data['main']['humidity'], data['main']['pressure'], data['wind']['speed'], data['wind']['deg'], data['clouds']['all']])
+        fieldnames = ['city', 'temperature', 'humidity', 'pressure', 'wind_speed', 'wind_degrees', 'cloudiness']
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerow({
+            'city': city,
+            'temperature': data['main']['temp'],
+            'humidity': data['main']['humidity'],
+            'pressure': data['main']['pressure'],
+            'wind_speed': data['wind']['speed'],
+            'wind_degrees': data['wind']['deg'],
+            'cloudiness': data['clouds']['all']
+        })
 
-    # Upload the CSV file to Azure Data Lake
-    with open(filename, mode='rb') as file:
-        service_client.upload_file(filepath, file)
+    # Upload the CSV file to Azure Blob Storage using SAS key
+    account_name = 'datamanproject1'
+    container_name = 'raw'
+    blob_name = f'weather/{filename}'
+    sas_token = 'sv=2021-12-02&ss=bfqt&srt=sco&sp=rwdlacupyx&se=2024-01-01T16:00:42Z&st=2023-03-15T08:00:42Z&spr=https&sig=mQkuRwZ2LVO8TAQWQ%2BteQ%2BU2%2FwHk7UrwCl6BhFHr1UY%3D'
+    blob_url_with_sas = f"https://{account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
+    blob_client = BlobClient.from_blob_url(blob_url_with_sas)
+    with open(filename, 'rb') as data:
+        blob_client.upload_blob(data, overwrite=True)
 
 # Define the default arguments for the DAG
 default_args = {
